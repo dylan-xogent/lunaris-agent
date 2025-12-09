@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker-compose down:*)",
+      "Bash(docker-compose up:*)",
+      "Bash(docker-compose logs:*)",
+      "Bash(find:*)",
+      "Bash(curl:*)",
+      "Bash(docker-compose exec:*)",
+      "Bash(go mod tidy:*)",
+      "Bash(powershell.exe -Command \"cd ''c:\\Users\\DylanJohnston\\OneDrive - XOGENT INC\\Desktop\\Lunaris-Agent\\services\\agent'' && go version\")",
+      "Bash(powershell.exe -Command \"Set-Location ''c:\\Users\\DylanJohnston\\OneDrive - XOGENT INC\\Desktop\\Lunaris-Agent\\services\\agent''; go version\")",
+      "Bash(powershell.exe:*)",
+      "Bash(powershell:*)",
+      "Bash(\"C:\\Program Files\\Go\\bin\\go.exe\" mod tidy)",
+      "Bash(\"C:\\Program Files\\Go\\bin\\go.exe\" build -o lunaris-agent.exe ./cmd/lunaris-agent)",
+      "Bash(\"C:\\Program Files\\Go\\bin\\go.exe\" doc github.com/zhouhui8915/go-socket.io-client Client)",
+      "Bash(python -m json.tool:*)",
+      "Bash(docker exec:*)",
+      "Bash(npm run build:*)",
+      "Bash(docker-compose ps:*)",
+      "Bash(timeout 75 docker-compose logs:*)",
+      "Bash(tree:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

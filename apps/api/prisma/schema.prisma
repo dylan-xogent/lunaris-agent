@@ -1,0 +1,259 @@
+// Lunaris Agent Platform Database Schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// Device - Represents an enrolled machine
+// ============================================
+model Device {
+  id           String   @id @default(uuid())
+  hostname     String
+  os           String
+  osVersion    String   @map("os_version")
+  ipAddress    String?  @map("ip_address")
+  macAddress   String   @unique @map("mac_address")
+  agentVersion String   @map("agent_version")
+  status       DeviceStatus @default(offline)
+  lastSeenAt   DateTime? @map("last_seen_at")
+  enrolledAt   DateTime @default(now()) @map("enrolled_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  updates      DeviceUpdate[]
+  events       UpdateEvent[]
+  metrics      DeviceMetrics?
+  commands     Command[]
+  groups       DeviceGroupMembership[]
+  tags         DeviceTag[]
+
+  @@map("devices")
+}
+
+enum DeviceStatus {
+  online
+  offline
+
+  @@map("device_status")
+}
+
+// ============================================
+// DeviceUpdate - Available updates for a device
+// ============================================
+model DeviceUpdate {
+  id                String   @id @default(uuid())
+  deviceId          String   @map("device_id")
+  packageIdentifier String   @map("package_identifier")
+  packageName       String   @map("package_name")
+  installedVersion  String?  @map("installed_version")
+  availableVersion  String   @map("available_version")
+  source            UpdateSource @default(winget)
+  severity          UpdateSeverity @default(optional)
+  size              String?
+  description       String?
+  publishedAt       DateTime? @map("published_at")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@unique([deviceId, packageIdentifier])
+  @@map("device_updates")
+}
+
+enum UpdateSource {
+  winget
+  windows_update
+  manual
+
+  @@map("update_source")
+}
+
+enum UpdateSeverity {
+  critical
+  important
+  optional
+
+  @@map("update_severity")
+}
+
+// ============================================
+// UpdateEvent - History of update actions
+// ============================================
+model UpdateEvent {
+  id        String   @id @default(uuid())
+  deviceId  String   @map("device_id")
+  action    UpdateAction
+  packageIdentifier String @map("package_identifier")
+  version   String?
+  status    EventStatus @default(pending)
+  message   String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@map("update_events")
+}
+
+enum UpdateAction {
+  detected
+  install_triggered
+  installed
+  failed
+  skipped
+
+  @@map("update_action")
+}
+
+enum EventStatus {
+  pending
+  in_progress
+  completed
+  failed
+
+  @@map("event_status")
+}
+
+// ============================================
+// DeviceMetrics - Real-time device metrics
+// ============================================
+model DeviceMetrics {
+  id          String   @id @default(uuid())
+  deviceId    String   @unique @map("device_id")
+  cpuUsage    Float?   @map("cpu_usage")
+  memoryUsage Float?   @map("memory_usage")
+  diskUsage   Float?   @map("disk_usage")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@map("device_metrics")
+}
+
+// ============================================
+// Command - Queued commands for agents to execute
+// ============================================
+model Command {
+  id                 String        @id @default(uuid())
+  deviceId           String        @map("device_id")
+  type               CommandType
+  packageIdentifiers String[]      @map("package_identifiers")
+  status             CommandStatus @default(pending)
+  result             String?
+  createdAt          DateTime      @default(now()) @map("created_at")
+  executedAt         DateTime?     @map("executed_at")
+  completedAt        DateTime?     @map("completed_at")
+
+  // Relations
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@map("commands")
+  @@index([deviceId, status])
+}
+
+enum CommandType {
+  install_updates
+  uninstall_package
+  run_scan
+
+  @@map("command_type")
+}
+
+enum CommandStatus {
+  pending
+  executing
+  completed
+  failed
+
+  @@map("command_status")
+}
+
+// ============================================
+// Group - Logical grouping of devices
+// ============================================
+model Group {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  color       String?  @default("#3B82F6") // Hex color for UI
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  devices DeviceGroupMembership[]
+
+  @@map("groups")
+}
+
+// ============================================
+// DeviceGroupMembership - Many-to-many relationship
+// ============================================
+model DeviceGroupMembership {
+  deviceId  String   @map("device_id")
+  groupId   String   @map("group_id")
+  addedAt   DateTime @default(now()) @map("added_at")
+
+  // Relations
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  group  Group  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@id([deviceId, groupId])
+  @@map("device_group_memberships")
+}
+
+// ============================================
+// Tag - Flexible labeling system for devices
+// ============================================
+model Tag {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  color     String?  @default("#10B981") // Hex color for UI
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  devices DeviceTag[]
+
+  @@map("tags")
+}
+
+// ============================================
+// DeviceTag - Many-to-many relationship
+// ============================================
+model DeviceTag {
+  deviceId String   @map("device_id")
+  tagId    String   @map("tag_id")
+  addedAt  DateTime @default(now()) @map("added_at")
+
+  // Relations
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  tag    Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([deviceId, tagId])
+  @@map("device_tags")
+}
+
+// ============================================
+// EnrollmentSecret - Future authentication
+// ============================================
+model EnrollmentSecret {
+  id        String   @id @default(uuid())
+  secret    String   @unique
+  name      String
+  isActive  Boolean  @default(true) @map("is_active")
+  usedCount Int      @default(0) @map("used_count")
+  expiresAt DateTime? @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("enrollment_secrets")
+}
+

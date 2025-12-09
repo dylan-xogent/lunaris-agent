@@ -1,0 +1,100 @@
+Lunaris Agent Platform – Full System Plan
+
+0. High-Level Goal
+Build a Windows update monitoring platform consisting of:
+1. Windows Agent – Windows service that detects available updates using winget and reports to the backend.
+2. Backend API + Realtime Layer – Receives agent data, stores device/update states, and broadcasts status over WebSockets.
+3. Web Console – Next.js interface displaying devices, statuses, updates, and future remote actions.
+
+1. Tech Stack Decisions
+Monorepo: pnpm workspaces + optional turbo
+Frontend: Next.js 14, TailwindCSS, shadcn/ui, React Query, WebSockets
+Backend: NestJS, PostgreSQL, Prisma ORM, WebSockets
+Agent: Go, HTTPS communication, optional WS commands
+Installer: MSI (WiX Toolset)
+
+2. Monorepo Structure
+lunaris-agent-platform/
+  apps/web/          # Next.js frontend
+  apps/api/          # NestJS backend
+  services/agent/    # Go agent
+  infra/installer/   # MSI build scripts
+  shared/types/      # Shared TS types
+
+3. Core Database Schema
+Tables:
+devices (id, hostname, os_version, agent_version, last_seen_at, status)
+device_updates (id, device_id, package_identifier, installed_version, available_version, source)
+update_events (history)
+enrollment_secrets (future auth)
+
+4. API Design (REST)
+Agent endpoints:
+/agent/register (POST)
+/agent/heartbeat (POST)
+/agent/update-report (POST)
+
+Console endpoints:
+/devices (GET)
+/devices/:id (GET)
+/devices/:id/updates (GET)
+/updates (GET)
+
+5. WebSocket Design
+Server → Console events:
+DEVICE_STATUS_UPDATE
+DEVICE_UPDATES_CHANGED
+
+Future remote actions:
+RUN_UPDATES
+
+6. Frontend Specification
+Pages:
+Dashboard – stats + devices table
+Devices – searchable table
+Device Detail – overview, updates, logs (future)
+Updates – aggregated updates table
+Settings – agent download link, API info
+
+Realtime: Subscribe to /ws/console, merge into React Query cache.
+
+7. Backend Implementation (NestJS)
+Modules: DevicesModule, AgentModule, UpdatesModule, RealtimeModule, PrismaModule
+Event flow:
+heartbeat → update device → broadcast WS event
+update-report → write update rows → broadcast WS update
+
+8. Windows Agent (Go)
+Responsibilities:
+- Generate/read deviceId
+- Register with backend
+- Heartbeat loop
+- WinGet scan loop
+- Report updates
+- Optional WebSocket for commands
+
+Config file:
+C:\ProgramData\LunarisAgent\config.json
+
+Binary installed to:
+C:\Program Files\LunarisAgent\
+
+9. Installer Plan (MSI via WiX)
+- Install agent to Program Files
+- Create ProgramData config directory
+- Register Windows service “LunarisAgentService”
+- Start service automatically
+- Optional installer parameters: API base URL, enrollment secret
+
+10. DevOps
+Local dev: docker-compose for Postgres + API + Web
+Environments: dev, staging, prod
+Logging: structured logs in backend; agent writes local log files
+
+11. Phase Roadmap
+Phase 1 – MVP (REST only, mock data frontend, CLI agent)
+Phase 2 – Realtime (WebSockets), Windows service conversion
+Phase 3 – MSI installer, security hardening
+Phase 4 – Remote actions (install updates, triggers)
+
+This file contains the complete architecture and implementation plan for the Lunaris Agent Platform.
