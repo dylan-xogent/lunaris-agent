@@ -211,7 +211,8 @@ function Install-Service {
     Write-Log "Installing Windows service..." -Level Info
 
     # Create service using sc.exe for better control
-    $result = & sc.exe create $ServiceName binPath= "`"$ExecutablePath`" -service" start= auto DisplayName= $DisplayName
+    # Note: The agent automatically detects if it's running as a service, no -service flag needed
+    $result = & sc.exe create $ServiceName binPath= "`"$ExecutablePath`"" start= auto DisplayName= "`"$DisplayName`"" obj= LocalSystem
 
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to create service: $result"
