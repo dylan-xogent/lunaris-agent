@@ -1,7 +1,8 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
-import { DeviceStatus } from '@prisma/client';
+import { EventsService } from '../events/events.service';
+import { DeviceStatus, ActivityEventType } from '@prisma/client';
 import { InstallUpdateDto } from './dto/install-update.dto';
 import { BulkAddToGroupDto } from './dto/bulk-add-to-group.dto';
 import { BulkAddTagsDto } from './dto/bulk-add-tags.dto';
@@ -18,6 +19,7 @@ export class DevicesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeGateway,
+    private readonly eventsService: EventsService,
   ) {}
 
   /**
@@ -162,6 +164,41 @@ export class DevicesService {
   }
 
   /**
+   * Get active commands for a device (pending, executing, or recently completed)
+   */
+  async getDeviceCommands(deviceId: string) {
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+    
+    const commands = await this.prisma.command.findMany({
+      where: {
+        deviceId,
+        OR: [
+          { status: { in: ['pending', 'executing'] } },
+          {
+            status: { in: ['completed', 'failed'] },
+            completedAt: { gte: fiveMinutesAgo }, // Show completed/failed from last 5 minutes
+          },
+        ],
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: 10, // Limit to recent 10 commands
+    });
+
+    return commands.map((cmd) => ({
+      id: cmd.id,
+      type: cmd.type,
+      status: cmd.status,
+      packageIdentifiers: cmd.packageIdentifiers,
+      result: cmd.result,
+      createdAt: cmd.createdAt,
+      executedAt: cmd.executedAt,
+      completedAt: cmd.completedAt,
+    }));
+  }
+
+  /**
    * Get updates for a specific device
    */
   async getDeviceUpdates(deviceId: string) {
@@ -195,6 +232,56 @@ export class DevicesService {
   }
 
   /**
+   * Get historical metrics for a device
+   */
+  async getDeviceMetrics(deviceId: string, range: string = '24h') {
+    const device = await this.prisma.device.findUnique({
+      where: { id: deviceId },
+    });
+
+    if (!device) {
+      throw new NotFoundException(`Device ${deviceId} not found`);
+    }
+
+    // Calculate time range
+    const now = new Date();
+    const rangeMinutes = {
+      '1h': 60,
+      '24h': 60 * 24,
+      '7d': 60 * 24 * 7,
+      '30d': 60 * 24 * 30,
+    }[range] || 60 * 24;
+
+    const startTime = new Date(now.getTime() - rangeMinutes * 60 * 1000);
+
+    // Fetch historical metrics
+    const metrics = await this.prisma.deviceMetricsHistory.findMany({
+      where: {
+        deviceId,
+        timestamp: {
+          gte: startTime,
+        },
+      },
+      orderBy: { timestamp: 'asc' },
+    });
+
+    return {
+      deviceId,
+      hostname: device.hostname,
+      range,
+      startTime: startTime.toISOString(),
+      endTime: now.toISOString(),
+      dataPoints: metrics.length,
+      metrics: metrics.map((m) => ({
+        timestamp: m.timestamp.toISOString(),
+        cpu: m.cpuUsage,
+        memory: m.memoryUsage,
+        disk: m.diskUsage,
+      })),
+    };
+  }
+
+  /**
    * Mark devices as offline if they haven't sent heartbeat recently
    */
   async markStaleDevicesOffline(staleThresholdMinutes: number = 1.5) {
@@ -222,6 +309,19 @@ export class DevicesService {
           DeviceStatus.offline,
           device.lastSeenAt || new Date(),
         );
+
+        // Create activity event for device going offline
+        await this.eventsService.createEvent({
+          type: ActivityEventType.device_offline,
+          deviceId: device.id,
+          deviceName: device.hostname,
+          title: `Device "${device.hostname}" went offline`,
+          description: `Device missed ${Math.ceil(staleThresholdMinutes * 2)} heartbeats`,
+          metadata: {
+            lastSeenAt: device.lastSeenAt?.toISOString(),
+            thresholdMinutes: staleThresholdMinutes,
+          },
+        });
       }
     }
 
@@ -301,6 +401,66 @@ export class DevicesService {
       deviceId,
       packagesQueued: updates.length,
       message: `Installation command queued for device ${device.hostname}`,
+    };
+  }
+
+  /**
+   * Trigger a forced sync (update scan) on a device
+   */
+  async syncDevice(deviceId: string) {
+    // Verify device exists and is online
+    const device = await this.prisma.device.findUnique({
+      where: { id: deviceId },
+    });
+
+    if (!device) {
+      throw new NotFoundException(`Device ${deviceId} not found`);
+    }
+
+    if (device.status !== DeviceStatus.online) {
+      throw new NotFoundException(
+        `Device ${deviceId} is offline and cannot receive commands`,
+      );
+    }
+
+    // Create sync command in database for agent to poll
+    const command = await this.prisma.command.create({
+      data: {
+        deviceId,
+        type: 'run_scan',
+        packageIdentifiers: [], // No packages needed for sync
+        status: 'pending',
+      },
+    });
+
+    // Create activity event for tracking
+    await this.prisma.activityEvent.create({
+      data: {
+        type: 'command_executed',
+        deviceId,
+        deviceName: device.hostname,
+        title: 'Sync Triggered',
+        description: `Update scan sync command queued (command: ${command.id})`,
+        metadata: {
+          commandId: command.id,
+          commandType: 'run_scan',
+          action: 'sync',
+        },
+      },
+    });
+
+    // Broadcast to console that sync has been triggered
+    this.realtime.broadcastUpdateInstallationStarted(
+      deviceId,
+      [],
+      command.id,
+    );
+
+    return {
+      success: true,
+      commandId: command.id,
+      deviceId,
+      message: `Sync command queued for device ${device.hostname}`,
     };
   }
 

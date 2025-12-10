@@ -141,6 +141,55 @@ model DeviceMetrics {
 }
 
 // ============================================
+// DeviceMetricsHistory - Time-series metrics for charts
+// ============================================
+model DeviceMetricsHistory {
+  id          String   @id @default(uuid())
+  deviceId    String   @map("device_id")
+  cpuUsage    Float?   @map("cpu_usage")
+  memoryUsage Float?   @map("memory_usage")
+  diskUsage   Float?   @map("disk_usage")
+  timestamp   DateTime @default(now())
+
+  @@map("device_metrics_history")
+  @@index([deviceId, timestamp])
+}
+
+// ============================================
+// ActivityEvent - System activity and event log
+// ============================================
+model ActivityEvent {
+  id         String   @id @default(uuid())
+  type       ActivityEventType
+  deviceId   String?  @map("device_id")
+  deviceName String?  @map("device_name")
+  title      String
+  description String?
+  metadata   Json?    // Flexible JSON field for event-specific data
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("activity_events")
+  @@index([type, createdAt])
+  @@index([deviceId, createdAt])
+}
+
+enum ActivityEventType {
+  device_enrolled
+  device_online
+  device_offline
+  device_updated
+  update_installed
+  update_failed
+  group_created
+  group_updated
+  tag_created
+  command_executed
+  bulk_operation
+
+  @@map("activity_event_type")
+}
+
+// ============================================
 // Command - Queued commands for agents to execute
 // ============================================
 model Command {

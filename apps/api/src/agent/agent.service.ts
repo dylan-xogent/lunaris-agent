@@ -1,16 +1,18 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
+import { EventsService } from '../events/events.service';
 import { RegisterDeviceDto } from './dto/register-device.dto';
 import { HeartbeatDto } from './dto/heartbeat.dto';
 import { UpdateReportDto } from './dto/update-report.dto';
-import { DeviceStatus, UpdateSource, UpdateSeverity } from '@prisma/client';
+import { DeviceStatus, UpdateSource, UpdateSeverity, ActivityEventType } from '@prisma/client';
 
 @Injectable()
 export class AgentService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeGateway,
+    private readonly eventsService: EventsService,
   ) {}
 
   /**
@@ -65,6 +67,20 @@ export class AgentService {
     // Broadcast new device registration
     this.realtime.broadcastDeviceRegistered(device);
 
+    // Create activity event
+    await this.eventsService.createEvent({
+      type: ActivityEventType.device_enrolled,
+      deviceId: device.id,
+      deviceName: device.hostname,
+      title: `Device "${device.hostname}" enrolled`,
+      description: `New device with MAC ${device.macAddress} running ${device.os} ${device.osVersion}`,
+      metadata: {
+        os: device.os,
+        osVersion: device.osVersion,
+        agentVersion: device.agentVersion,
+      },
+    });
+
     return {
       deviceId: device.id,
       message: 'Device registered successfully',
@@ -110,6 +126,31 @@ export class AgentService {
           cpuUsage: dto.cpuUsage,
           memoryUsage: dto.memoryUsage,
           diskUsage: dto.diskUsage,
+        },
+      });
+
+      // Store metrics in history for charts (every heartbeat = every 30 seconds)
+      await this.prisma.deviceMetricsHistory.create({
+        data: {
+          deviceId: dto.deviceId,
+          cpuUsage: dto.cpuUsage,
+          memoryUsage: dto.memoryUsage,
+          diskUsage: dto.diskUsage,
+          timestamp: now,
+        },
+      });
+    }
+
+    // Create activity event if device came back online
+    if (wasOffline) {
+      await this.eventsService.createEvent({
+        type: ActivityEventType.device_online,
+        deviceId: dto.deviceId,
+        deviceName: device.hostname,
+        title: `Device "${device.hostname}" came online`,
+        description: `Device reconnected after being offline`,
+        metadata: {
+          ipAddress: dto.ipAddress,
         },
       });
     }

@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"golang.org/x/sys/windows/svc"
@@ -25,6 +26,21 @@ const ServiceDescription = "Monitors Windows updates and reports to Lunaris cons
 
 var elog debug.Log
 
+// eventLogLogger adapts debug.Log to agent.Logger interface
+type eventLogLogger struct {
+	log debug.Log
+}
+
+func (e *eventLogLogger) Printf(format string, v ...interface{}) {
+	msg := fmt.Sprintf(format, v...)
+	e.log.Info(1, msg)
+}
+
+func (e *eventLogLogger) Println(v ...interface{}) {
+	msg := fmt.Sprintln(v...)
+	e.log.Info(1, strings.TrimSpace(msg))
+}
+
 // lunarisService implements svc.Handler
 type lunarisService struct {
 	cfg *config.Config
@@ -37,8 +53,9 @@ func (s *lunarisService) Execute(args []string, r <-chan svc.ChangeRequest, chan
 	changes <- svc.Status{State: svc.StartPending}
 	elog.Info(1, fmt.Sprintf("Starting %s", ServiceName))
 
-	// Create agent
-	agentInstance := agent.New(s.cfg)
+	// Create agent with event log logger
+	eventLogger := &eventLogLogger{log: elog}
+	agentInstance := agent.NewWithLogger(s.cfg, eventLogger)
 
 	// Create context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
@@ -129,7 +146,7 @@ func IsWindowsService() bool {
 	return isService
 }
 
-// InstallService installs the Windows service
+// InstallService installs the Windows service to run as the current user
 func InstallService(exePath string) error {
 	m, err := mgr.Connect()
 	if err != nil {
@@ -153,6 +170,23 @@ func InstallService(exePath string) error {
 	}
 	defer s.Close()
 
+	// Get current user info for logging
+	currentUser := os.Getenv("USERNAME")
+	userDomain := os.Getenv("USERDOMAIN")
+	var serviceUser string
+	if userDomain != "" && userDomain != "." {
+		serviceUser = fmt.Sprintf("%s\\%s", userDomain, currentUser)
+	} else {
+		serviceUser = fmt.Sprintf(".\\%s", currentUser)
+	}
+
+	// Note: Service is created as LocalSystem by default
+	// To run as user, configure it after installation using:
+	// sc.exe config LunarisAgentService obj= <user> password= <password>
+	// Or use the configure-service-as-user.ps1 script
+	log.Printf("Service %s installed successfully", ServiceName)
+	log.Printf("To run as user account, configure it to run as: %s", serviceUser)
+
 	// Set up event log
 	err = eventlog.InstallAsEventCreate(ServiceName, eventlog.Error|eventlog.Warning|eventlog.Info)
 	if err != nil {
@@ -160,7 +194,6 @@ func InstallService(exePath string) error {
 		return fmt.Errorf("failed to setup event log: %w", err)
 	}
 
-	log.Printf("Service %s installed successfully", ServiceName)
 	return nil
 }
 

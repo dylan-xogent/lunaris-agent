@@ -212,3 +212,66 @@ export interface BulkInstallUpdatesRequest {
   deviceIds: string[];
   packageIdentifiers: string[];
 }
+
+// ============================================
+// Activity Events
+// ============================================
+
+export type ActivityEventType =
+  | "device_enrolled"
+  | "device_online"
+  | "device_offline"
+  | "device_updated"
+  | "update_installed"
+  | "update_failed"
+  | "group_created"
+  | "group_updated"
+  | "tag_created"
+  | "command_executed"
+  | "bulk_operation";
+
+export interface ActivityEvent {
+  id: string;
+  type: ActivityEventType;
+  deviceId?: string;
+  deviceName?: string;
+  title: string;
+  description?: string;
+  metadata?: Record<string, any>;
+  createdAt: string;
+}
+
+export interface EventsResponse {
+  events: ActivityEvent[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface EventsFilter {
+  limit?: number;
+  offset?: number;
+  type?: string;
+  deviceId?: string;
+}
+
+// ============================================
+// Device Metrics
+// ============================================
+
+export interface DeviceMetricPoint {
+  timestamp: string;
+  cpu: number | null;
+  memory: number | null;
+  disk: number | null;
+}
+
+export interface DeviceMetricsResponse {
+  deviceId: string;
+  hostname: string;
+  range: string;
+  startTime: string;
+  endTime: string;
+  dataPoints: number;
+  metrics: DeviceMetricPoint[];
+}

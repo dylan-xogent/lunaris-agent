@@ -17,10 +17,14 @@ import type {
   BulkAddToGroupRequest,
   BulkAddTagsRequest,
   BulkInstallUpdatesRequest,
+  EventsResponse,
+  EventsFilter,
+  DeviceMetricsResponse,
 } from "./types";
 
 // Configuration
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001/api";
+// Using Vite proxy - all /api calls are proxied to http://localhost:3001/api
+const API_BASE_URL = import.meta.env.VITE_API_URL || "/api";
 
 // Helper for API requests
 async function apiRequest<T>(
@@ -81,6 +85,22 @@ export async function getDevice(id: string): Promise<Device | null> {
 }
 
 /**
+ * Get active commands for a device
+ */
+export async function getDeviceCommands(deviceId: string): Promise<Array<{
+  id: string;
+  type: string;
+  status: 'pending' | 'executing' | 'completed' | 'failed';
+  packageIdentifiers: string[];
+  result?: string | null;
+  createdAt: string;
+  executedAt?: string | null;
+  completedAt?: string | null;
+}>> {
+  return apiRequest(`/devices/${deviceId}/commands`);
+}
+
+/**
  * Get updates for a specific device
  */
 export async function getDeviceUpdates(deviceId: string): Promise<Update[]> {
@@ -103,6 +123,20 @@ export async function installUpdates(
   return apiRequest(`/devices/${deviceId}/install-updates`, {
     method: "POST",
     body: JSON.stringify({ deviceId, packageIdentifiers }),
+  });
+}
+
+/**
+ * Trigger a forced sync (update scan) on a device
+ */
+export async function syncDevice(deviceId: string): Promise<{
+  success: boolean;
+  commandId: string;
+  deviceId: string;
+  message: string;
+}> {
+  return apiRequest(`/devices/${deviceId}/sync`, {
+    method: "POST",
   });
 }
 
@@ -141,6 +175,56 @@ export async function getUpdates(filter?: UpdatesFilter): Promise<Update[]> {
  */
 export async function getStats(): Promise<DashboardStats> {
   return apiRequest<DashboardStats>("/stats");
+}
+
+// ============================================
+// Activity Events Operations
+// ============================================
+
+/**
+ * Get activity events with optional filtering
+ */
+export async function getEvents(filter?: EventsFilter): Promise<EventsResponse> {
+  const params = new URLSearchParams();
+
+  if (filter?.limit) {
+    params.append("limit", filter.limit.toString());
+  }
+  if (filter?.offset) {
+    params.append("offset", filter.offset.toString());
+  }
+  if (filter?.type && filter.type !== "all") {
+    params.append("type", filter.type);
+  }
+  if (filter?.deviceId) {
+    params.append("deviceId", filter.deviceId);
+  }
+
+  const queryString = params.toString();
+  const endpoint = queryString ? `/events?${queryString}` : "/events";
+
+  return apiRequest<EventsResponse>(endpoint);
+}
+
+/**
+ * Get recent events (last 24 hours)
+ */
+export async function getRecentEvents(limit: number = 20): Promise<EventsResponse> {
+  return apiRequest<EventsResponse>(`/events/recent?limit=${limit}`);
+}
+
+// ============================================
+// Device Metrics Operations
+// ============================================
+
+/**
+ * Get historical metrics for a device
+ */
+export async function getDeviceMetrics(
+  deviceId: string,
+  range: string = "24h"
+): Promise<DeviceMetricsResponse> {
+  return apiRequest<DeviceMetricsResponse>(`/devices/${deviceId}/metrics?range=${range}`);
 }
 
 // ============================================
@@ -405,12 +489,18 @@ export const api = {
     getById: getDevice,
     getUpdates: getDeviceUpdates,
     installUpdates,
+    sync: syncDevice,
+    getMetrics: getDeviceMetrics,
   },
   updates: {
     getAll: getUpdates,
   },
   dashboard: {
     getStats,
+  },
+  events: {
+    getAll: getEvents,
+    getRecent: getRecentEvents,
   },
   settings: {
     get: getSettings,

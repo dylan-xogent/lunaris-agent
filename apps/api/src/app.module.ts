@@ -9,12 +9,22 @@ import { RealtimeModule } from './realtime/realtime.module';
 import { StatsModule } from './stats/stats.module';
 import { GroupsModule } from './groups/groups.module';
 import { TagsModule } from './tags/tags.module';
+import { EventsModule } from './events/events.module';
+import { HealthModule } from './health/health.module';
+import configuration from './config/configuration';
+import { validate } from './config/validation.schema';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',
+      load: [configuration],
+      validate,
+      validationOptions: {
+        allowUnknown: true,
+        abortEarly: false,
+      },
     }),
     ScheduleModule.forRoot(),
     PrismaModule,
@@ -25,6 +35,8 @@ import { TagsModule } from './tags/tags.module';
     StatsModule,
     GroupsModule,
     TagsModule,
+    EventsModule,
+    HealthModule,
   ],
 })
 export class AppModule {}

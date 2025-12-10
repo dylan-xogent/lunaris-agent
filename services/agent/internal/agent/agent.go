@@ -17,19 +17,36 @@ import (
 
 const AgentVersion = "1.0.0"
 
+// Logger is an interface for logging
+type Logger interface {
+	Printf(format string, v ...interface{})
+	Println(v ...interface{})
+}
+
 // Agent is the main agent controller
 type Agent struct {
 	config    *config.Config
 	client    *api.Client
 	scanner   *winget.Scanner
 	installer *winget.Installer
-	logger    *log.Logger
+	logger    Logger
 }
 
 // New creates a new agent instance
 func New(cfg *config.Config) *Agent {
 	logger := log.New(os.Stdout, "[Lunaris Agent] ", log.LstdFlags)
 
+	return &Agent{
+		config:    cfg,
+		client:    api.NewClient(cfg.APIURL),
+		scanner:   winget.NewScanner(),
+		installer: winget.NewInstaller(),
+		logger:    logger,
+	}
+}
+
+// NewWithLogger creates a new agent instance with a custom logger
+func NewWithLogger(cfg *config.Config, logger Logger) *Agent {
 	return &Agent{
 		config:    cfg,
 		client:    api.NewClient(cfg.APIURL),
@@ -115,6 +132,8 @@ func (a *Agent) executeCommand(cmd api.Command) {
 	switch cmd.Type {
 	case "install_updates":
 		a.executeInstallCommand(cmd)
+	case "run_scan":
+		a.executeSyncCommand(cmd)
 	default:
 		a.logger.Printf("Unknown command type: %s", cmd.Type)
 		a.client.CompleteCommand(cmd.ID, false, fmt.Sprintf("Unknown command type: %s", cmd.Type))
@@ -165,6 +184,45 @@ func (a *Agent) executeInstallCommand(cmd api.Command) {
 	}()
 }
 
+// executeSyncCommand executes a run_scan command to force an immediate update scan
+func (a *Agent) executeSyncCommand(cmd api.Command) {
+	a.logger.Println("Executing sync command - triggering immediate update scan")
+
+	// Run scan in a goroutine so we can report command completion
+	go func() {
+		updates, err := a.scanner.ScanUpdates()
+		if err != nil {
+			a.logger.Printf("Sync scan failed: %v", err)
+			a.client.CompleteCommand(cmd.ID, false, fmt.Sprintf("Scan failed: %v", err))
+			return
+		}
+
+		a.logger.Printf("Sync scan completed: found %d available updates", len(updates))
+		for i, u := range updates {
+			a.logger.Printf("  Update %d: %s (%s) - %s -> %s", i+1, u.PackageName, u.PackageIdentifier, u.InstalledVersion, u.AvailableVersion)
+		}
+
+		// Report updates to backend
+		apiUpdates := winget.ToAPIUpdates(updates)
+		a.logger.Printf("Reporting %d updates to backend...", len(apiUpdates))
+		req := &api.UpdateReportRequest{
+			DeviceID: a.config.DeviceID,
+			Updates:  apiUpdates,
+		}
+
+		resp, err := a.client.ReportUpdates(req)
+		if err != nil {
+			a.logger.Printf("Failed to report updates: %v", err)
+			a.client.CompleteCommand(cmd.ID, false, fmt.Sprintf("Failed to report updates: %v", err))
+			return
+		}
+
+		a.logger.Printf("Sync completed: %d updates reported to server (response: %d received)", len(updates), resp.Received)
+		resultText := fmt.Sprintf("Scan completed successfully. Found %d available updates.", len(updates))
+		a.client.CompleteCommand(cmd.ID, true, resultText)
+	}()
+}
+
 // register registers the device with the backend
 func (a *Agent) register() error {
 	hostname, err := os.Hostname()
@@ -203,7 +261,7 @@ func (a *Agent) register() error {
 	return nil
 }
 
-// sendHeartbeat sends a heartbeat to the backend
+// sendHeartbeat sends a heartbeat to the backend with retry logic
 func (a *Agent) sendHeartbeat() {
 	sysMetrics, err := metrics.Collect()
 	if err != nil {
@@ -223,13 +281,34 @@ func (a *Agent) sendHeartbeat() {
 		req.DiskUsage = &sysMetrics.DiskUsage
 	}
 
-	resp, err := a.client.Heartbeat(req)
-	if err != nil {
-		a.logger.Printf("Heartbeat failed: %v", err)
-		return
+	// Retry logic with exponential backoff
+	maxRetries := 3
+	retryDelay := 5 * time.Second
+
+	var resp *api.HeartbeatResponse
+	var lastErr error
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			// Exponential backoff: 5s, 10s, 20s
+			delay := time.Duration(attempt) * retryDelay
+			a.logger.Printf("Retrying heartbeat in %v (attempt %d/%d)...", delay, attempt, maxRetries)
+			time.Sleep(delay)
+		}
+
+		resp, err = a.client.Heartbeat(req)
+		if err == nil {
+			// Success
+			a.logger.Printf("Heartbeat OK (server time: %s)", resp.ServerTime)
+			return
+		}
+
+		lastErr = err
+		a.logger.Printf("Heartbeat attempt %d failed: %v", attempt+1, err)
 	}
 
-	a.logger.Printf("Heartbeat OK (server time: %s)", resp.ServerTime)
+	// All retries exhausted
+	a.logger.Printf("Heartbeat failed after %d attempts: %v", maxRetries+1, lastErr)
 }
 
 // scanAndReportUpdates scans for updates and reports them
@@ -243,10 +322,15 @@ func (a *Agent) scanAndReportUpdates() {
 	}
 
 	a.logger.Printf("Found %d available updates", len(updates))
+	for i, u := range updates {
+		a.logger.Printf("  Update %d: %s (%s) - %s -> %s", i+1, u.PackageName, u.PackageIdentifier, u.InstalledVersion, u.AvailableVersion)
+	}
 
+	apiUpdates := winget.ToAPIUpdates(updates)
+	a.logger.Printf("Reporting %d updates to backend...", len(apiUpdates))
 	req := &api.UpdateReportRequest{
 		DeviceID: a.config.DeviceID,
-		Updates:  winget.ToAPIUpdates(updates),
+		Updates:  apiUpdates,
 	}
 
 	resp, err := a.client.ReportUpdates(req)
@@ -255,7 +339,7 @@ func (a *Agent) scanAndReportUpdates() {
 		return
 	}
 
-	a.logger.Printf("Update report sent: %d updates received by server", resp.Received)
+	a.logger.Printf("Update report sent: %d updates received by server (reported %d)", resp.Received, len(updates))
 }
 
 // getOSInfo returns OS name and version

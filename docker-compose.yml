@@ -40,16 +40,13 @@ services:
     networks:
       - lunaris-network
 
-  # Next.js Web Console
+  # Vite + React Web Console
   web:
     build:
       context: ./apps/web
       dockerfile: Dockerfile
     container_name: lunaris-web
     restart: unless-stopped
-    environment:
-      NEXT_PUBLIC_API_URL: http://localhost:3001/api
-      NEXT_PUBLIC_WS_URL: http://localhost:3001/ws/console
     ports:
       - "3000:3000"
     depends_on:

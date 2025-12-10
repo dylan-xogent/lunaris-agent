@@ -30,10 +30,14 @@ async function bootstrap() {
     .setDescription(
       'REST API for Lunaris Agent Platform - Windows update monitoring and management',
     )
-    .setVersion('1.0')
+    .setVersion('1.0.0')
+    .addTag('health', 'System health and monitoring endpoints')
     .addTag('agent', 'Agent communication endpoints')
     .addTag('devices', 'Device management endpoints')
     .addTag('updates', 'Update tracking endpoints')
+    .addTag('groups', 'Device group management endpoints')
+    .addTag('tags', 'Device tag management endpoints')
+    .addTag('events', 'Activity event logging endpoints')
     .addTag('stats', 'Statistics and dashboard endpoints')
     .build();
   const document = SwaggerModule.createDocument(app, config);

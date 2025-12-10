@@ -29,11 +29,31 @@ export class DevicesController {
   }
 
   /**
+   * Get active commands for a device
+   */
+  @Get(':id/commands')
+  async getDeviceCommands(@Param('id') id: string) {
+    return this.devicesService.getDeviceCommands(id);
+  }
+
+  /**
    * Get updates for a specific device
    */
   @Get(':id/updates')
   async getDeviceUpdates(@Param('id') id: string) {
     return this.devicesService.getDeviceUpdates(id);
+  }
+
+  /**
+   * Get historical metrics for a device
+   * GET /api/devices/:id/metrics?range=1h|24h|7d|30d
+   */
+  @Get(':id/metrics')
+  async getDeviceMetrics(
+    @Param('id') id: string,
+    @Query('range') range?: string,
+  ) {
+    return this.devicesService.getDeviceMetrics(id, range || '24h');
   }
 
   /**
@@ -45,6 +65,15 @@ export class DevicesController {
     @Body() dto: InstallUpdateDto,
   ) {
     return this.devicesService.installUpdates(id, dto);
+  }
+
+  /**
+   * Trigger a forced sync (update scan) on a device
+   */
+  @Post(':id/sync')
+  @HttpCode(HttpStatus.OK)
+  async syncDevice(@Param('id') id: string) {
+    return this.devicesService.syncDevice(id);
   }
 
   /**
